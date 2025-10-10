@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "todo-list-python"
+version = "0.1.0"
+description = ""
+authors = ["Andson Oliveira <andson.oliveira@mec.gov.br>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = {extras = ["standard"], version = "^0.118.3"}
+uvicorn = "^0.37.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^5.2"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
