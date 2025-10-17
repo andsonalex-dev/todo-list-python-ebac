@@ -8,8 +8,9 @@ authors = ["Andson Oliveira <andson.oliveira@mec.gov.br>"]
 python = "^3.10"
 fastapi = {extras = ["standard"], version = "^0.118.3"}
 uvicorn = "^0.37.0"
+pydantic = "^2.12.2"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 pytest = "^5.2"
 
 [build-system]
