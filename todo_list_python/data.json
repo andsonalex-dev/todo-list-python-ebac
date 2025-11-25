@@ -16,5 +16,65 @@
     "title": "Atividade Python EBAC - Atualização",
     "description": "Treinamento API Rest Python EBAC",
     "done": true
+  },
+  {
+    "id": 4,
+    "title": "Atividade Python EBAC - Autenticação",
+    "description": "Autenticação",
+    "done": false
+  },
+  {
+    "id": 5,
+    "title": "Atividade Python EBAC - Paginação",
+    "description": "Paginação",
+    "done": false
+  },
+  {
+    "id": 6,
+    "title": "Atividade Python EBAC - Order By",
+    "description": "Order By",
+    "done": true
+  },
+  {
+    "id": 7,
+    "title": "Atividade Python EBAC - Lista",
+    "description": "Lista",
+    "done": false
+  },
+  {
+    "id": 8,
+    "title": "Atividade Python EBAC - Arrays",
+    "description": "Arrays",
+    "done": true
+  },
+  {
+    "id": 9,
+    "title": "Atividade Python EBAC - Ordenação",
+    "description": "Ordenação",
+    "done": false
+  },
+  {
+    "id": 10,
+    "title": "Atividade Python EBAC - Testes Unitários",
+    "description": "Testes Unitários",
+    "done": true
+  },
+  {
+    "id": 11,
+    "title": "Atividade Python EBAC - Testes",
+    "description": "Testes",
+    "done": false
+  },
+  {
+    "id": 12,
+    "title": "Atividade Python EBAC - Basic Auth",
+    "description": "Basic Auth",
+    "done": true
+  },
+  {
+    "id": 13,
+    "title": "Atividade Python EBAC - Base64",
+    "description": "base64",
+    "done": true
   }
 ]
