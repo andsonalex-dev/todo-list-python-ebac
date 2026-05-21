@@ -1,14 +1,14 @@
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field, field_validator
-from typing import Annotated, List, Optional
-import json
+from typing import Annotated, Optional
+import sqlite3
 import secrets
 from pathlib import Path
 
 app = FastAPI(title="ToDoList EBAC", version="1.0.0")
 
-DATA_FILE = Path(__file__).parent / "data.json"
+DB_FILE = Path(__file__).parent / "todos.db"
 TASK_NOT_FOUND_MSG = "Tarefa não encontrada."
 
 security = HTTPBasic()
@@ -19,222 +19,301 @@ USERS = {
     "user": "user123"
 }
 
+
 def verify_credentials(credentials: Annotated[HTTPBasicCredentials, Depends(security)]):
     username = credentials.username
     password = credentials.password
-    
+
     if username not in USERS or not secrets.compare_digest(password, USERS[username]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenciais inválidas",
             headers={"WWW-Authenticate": "Basic"},
         )
+
     return username
 
-if not DATA_FILE.exists():
-    DATA_FILE.write_text("[]")
-    
+
+# =========================================
+# DATABASE
+# =========================================
+
+def get_connection():
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_connection()
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS todos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL,
+            done BOOLEAN NOT NULL DEFAULT 0
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+# =========================================
+# MODELS
+# =========================================
+
 class TodoItem(BaseModel):
-    id: int = Field(..., description="ID único da tarefa", gt=0)
-    title: str = Field(..., description="Título da tarefa", min_length=1, max_length=100)
-    description: str = Field(..., description="Descrição da tarefa", min_length=1, max_length=500)
-    done: bool = Field(default=False, description="Status de conclusão da tarefa")
-    
+    id: int
+    title: str = Field(..., min_length=1, max_length=100)
+    description: str = Field(..., min_length=1, max_length=500)
+    done: bool = False
+
     @field_validator('title', 'description')
     @classmethod
     def validate_not_empty_string(cls, v: str) -> str:
         if not v or v.strip() == "":
-            raise ValueError('Campo não pode estar vazio')
+            raise ValueError("Campo não pode estar vazio")
+
         return v.strip()
-    
-    @classmethod
-    def load_all(cls) -> List['TodoItem']:
-        """Carrega todas as tarefas do arquivo JSON"""
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return [cls(**item) for item in data]
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
-    
-    @classmethod
-    def save_all(cls, todos: List['TodoItem']) -> None:
-        """Salva todas as tarefas no arquivo JSON"""
-        data = [todo.model_dump() for todo in todos]
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-    
-    @classmethod
-    def get_next_id(cls) -> int:
-        """Obtém o próximo ID disponível"""
-        todos = cls.load_all()
-        return max((todo.id for todo in todos), default=0) + 1
+
 
 class TodoCreate(BaseModel):
-    title: str = Field(..., description="Título da tarefa", min_length=1, max_length=100)
-    description: str = Field(..., description="Descrição da tarefa", min_length=1, max_length=500)
-    done: Optional[bool] = Field(default=False, description="Status de conclusão da tarefa")
-    
+    title: str = Field(..., min_length=1, max_length=100)
+    description: str = Field(..., min_length=1, max_length=500)
+    done: Optional[bool] = False
+
     @field_validator('title', 'description')
     @classmethod
     def validate_not_empty_string(cls, v: str) -> str:
         if not v or v.strip() == "":
-            raise ValueError('Campo não pode estar vazio')
+            raise ValueError("Campo não pode estar vazio")
+
         return v.strip()
 
-def read_data() -> List[TodoItem]:
-    """Lê os dados e retorna uma lista de TodoItem"""
-    return TodoItem.load_all()
 
-
-def write_data(todos: List[TodoItem]) -> None:
-    """Escreve os dados no arquivo"""
-    TodoItem.save_all(todos)
-
+# =========================================
+# ROUTES
+# =========================================
 
 @app.get("/todos")
 def list_todos(
     username: Annotated[str, Depends(verify_credentials)],
-    page: int = Query(default=1, ge=1, description="Número da página"),
-    size: int = Query(default=10, ge=1, le=100, description="Quantidade de itens por página"),
-    order_by: Optional[str] = Query(None, description="Campo para ordenar (id, title, done, description)"),
-    order_direction: Optional[str] = Query("asc", description="Direção da ordenação (asc ou desc)")
-   
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=10, ge=1, le=100),
+    order_by: Optional[str] = Query(None),
+    order_direction: Optional[str] = Query("asc")
 ):
-    """Lista todas as tarefas com paginação (requer autenticação)"""
-    todos = read_data()
+    conn = get_connection()
 
-    # Validação e ordenação dos itens
+    valid_fields = {"id", "title", "description", "done"}
+
+    query = "SELECT * FROM todos"
+
     if order_by:
-        valid_fields = {"id", "title", "description", "done"}
         if order_by not in valid_fields:
             raise HTTPException(
                 status_code=400,
-                detail=f"Campo '{order_by}' inválido. Use: {', '.join(sorted(valid_fields))}"
+                detail=f"Campo '{order_by}' inválido."
             )
-        try:
-            reverse = order_direction == "desc"
-            todos.sort(key=lambda x: getattr(x, order_by), reverse=reverse)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Erro ao ordenar por {order_by}: {str(e)}")
 
-    total = len(todos)
-    
-    # Calcula os índices de início e fim da página
-    start_index = (page - 1) * size
-    end_index = start_index + size
-    
-    # Obtém os itens da página atual
-    paginated_todos = todos[start_index:end_index]
+        direction = "DESC" if order_direction == "desc" else "ASC"
 
-    
+        query += f" ORDER BY {order_by} {direction}"
+
+    offset = (page - 1) * size
+
+    query += " LIMIT ? OFFSET ?"
+
+    rows = conn.execute(query, (size, offset)).fetchall()
+
+    total = conn.execute("SELECT COUNT(*) FROM todos").fetchone()[0]
+
+    conn.close()
+
+    items = [dict(row) for row in rows]
+
     return {
         "page": page,
         "size": size,
         "total": total,
-        "total_pages": (total + size - 1) // size, # Cálculo do total de páginas
-        "items": paginated_todos
+        "total_pages": (total + size - 1) // size,
+        "items": items
     }
 
 
 @app.post("/todos", response_model=TodoItem)
-def create_todo(todo: TodoCreate, username: Annotated[str, Depends(verify_credentials)]):
-    """Cria uma nova tarefa (requer autenticação)"""
-    todos = read_data()
-    next_id = TodoItem.get_next_id()
+def create_todo(
+    todo: TodoCreate,
+    username: Annotated[str, Depends(verify_credentials)]
+):
+    conn = get_connection()
 
-    new_todo = TodoItem(
-        id=next_id, 
-        title=todo.title, 
-        description=todo.description, 
-        done=todo.done
+    cursor = conn.execute(
+        """
+        INSERT INTO todos (title, description, done)
+        VALUES (?, ?, ?)
+        """,
+        (todo.title, todo.description, todo.done)
     )
-    todos.append(new_todo)
-    write_data(todos)
-    return new_todo
 
+    conn.commit()
 
-@app.put("/todos/{todo_id}", response_model=TodoItem)
-def update_todo(todo_id: int, updated_todo: TodoCreate, username: Annotated[str, Depends(verify_credentials)]):
-    """Atualiza uma tarefa existente (requer autenticação)"""
-    todos = read_data()
+    todo_id = cursor.lastrowid
 
-    for i, todo in enumerate(todos):
-        if todo.id == todo_id:
-            # Cria um novo objeto TodoItem com os dados atualizados
-            updated = TodoItem(
-                id=todo_id,
-                title=updated_todo.title,
-                description=updated_todo.description,
-                done=updated_todo.done
-            )
-            todos[i] = updated
-            write_data(todos)
-            return updated
+    row = conn.execute(
+        "SELECT * FROM todos WHERE id = ?",
+        (todo_id,)
+    ).fetchone()
 
-    raise HTTPException(status_code=404, detail=TASK_NOT_FOUND_MSG)
+    conn.close()
 
-
-@app.delete("/todos/{todo_id}")
-def delete_todo(todo_id: int, username: Annotated[str, Depends(verify_credentials)]):
-    """Remove uma tarefa (requer autenticação)"""
-    todos = read_data()
-    initial_count = len(todos)
-    
-    todos = [todo for todo in todos if todo.id != todo_id]
-
-    if len(todos) == initial_count:
-        raise HTTPException(status_code=404, detail=TASK_NOT_FOUND_MSG)
-
-    write_data(todos)
-    return {"message": "Tarefa removida com sucesso."}
+    return dict(row)
 
 
 @app.get("/todos/{todo_id}", response_model=TodoItem)
-def get_todo(todo_id: int, username: Annotated[str, Depends(verify_credentials)]):
-    """Obtém uma tarefa específica (requer autenticação)"""
-    todos = read_data()
-    
-    for todo in todos:
-        if todo.id == todo_id:
-            return todo
-    
-    raise HTTPException(status_code=404, detail=TASK_NOT_FOUND_MSG)
+def get_todo(
+    todo_id: int,
+    username: Annotated[str, Depends(verify_credentials)]
+):
+    conn = get_connection()
+
+    row = conn.execute(
+        "SELECT * FROM todos WHERE id = ?",
+        (todo_id,)
+    ).fetchone()
+
+    conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=TASK_NOT_FOUND_MSG)
+
+    return dict(row)
+
+
+@app.put("/todos/{todo_id}", response_model=TodoItem)
+def update_todo(
+    todo_id: int,
+    updated_todo: TodoCreate,
+    username: Annotated[str, Depends(verify_credentials)]
+):
+    conn = get_connection()
+
+    cursor = conn.execute(
+        """
+        UPDATE todos
+        SET title = ?, description = ?, done = ?
+        WHERE id = ?
+        """,
+        (
+            updated_todo.title,
+            updated_todo.description,
+            updated_todo.done,
+            todo_id
+        )
+    )
+
+    conn.commit()
+
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail=TASK_NOT_FOUND_MSG)
+
+    row = conn.execute(
+        "SELECT * FROM todos WHERE id = ?",
+        (todo_id,)
+    ).fetchone()
+
+    conn.close()
+
+    return dict(row)
+
+
+@app.delete("/todos/{todo_id}")
+def delete_todo(
+    todo_id: int,
+    username: Annotated[str, Depends(verify_credentials)]
+):
+    conn = get_connection()
+
+    cursor = conn.execute(
+        "DELETE FROM todos WHERE id = ?",
+        (todo_id,)
+    )
+
+    conn.commit()
+
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail=TASK_NOT_FOUND_MSG)
+
+    conn.close()
+
+    return {"message": "Tarefa removida com sucesso."}
 
 
 @app.patch("/todos/{todo_id}/toggle", response_model=TodoItem)
-def toggle_todo_status(todo_id: int, username: Annotated[str, Depends(verify_credentials)]):
-    """Alterna o status de conclusão de uma tarefa (requer autenticação)"""
-    todos = read_data()
-    
-    for i, todo in enumerate(todos):
-        if todo.id == todo_id:
-            # Cria um novo objeto com o status invertido
-            updated = TodoItem(
-                id=todo.id,
-                title=todo.title,
-                description=todo.description,
-                done=not todo.done
-            )
-            todos[i] = updated
-            write_data(todos)
-            return updated
-    
-    raise HTTPException(status_code=404, detail=TASK_NOT_FOUND_MSG)
+def toggle_todo_status(
+    todo_id: int,
+    username: Annotated[str, Depends(verify_credentials)]
+):
+    conn = get_connection()
+
+    row = conn.execute(
+        "SELECT * FROM todos WHERE id = ?",
+        (todo_id,)
+    ).fetchone()
+
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail=TASK_NOT_FOUND_MSG)
+
+    new_status = not bool(row["done"])
+
+    conn.execute(
+        "UPDATE todos SET done = ? WHERE id = ?",
+        (new_status, todo_id)
+    )
+
+    conn.commit()
+
+    updated = conn.execute(
+        "SELECT * FROM todos WHERE id = ?",
+        (todo_id,)
+    ).fetchone()
+
+    conn.close()
+
+    return dict(updated)
 
 
 @app.get("/todos/status/{status}")
-def get_todos_by_status(status: str, username: Annotated[str, Depends(verify_credentials)]):
-    """Obtém tarefas filtradas por status (completed/pending) - requer autenticação"""
+def get_todos_by_status(
+    status: str,
+    username: Annotated[str, Depends(verify_credentials)]
+):
     if status not in ["completed", "pending"]:
-        raise HTTPException(status_code=400, detail="Status deve ser 'completed' ou 'pending'")
-    
-    todos = read_data()
+        raise HTTPException(
+            status_code=400,
+            detail="Status deve ser 'completed' ou 'pending'"
+        )
+
     is_done = status == "completed"
-    filtered_todos = [todo for todo in todos if todo.done == is_done]
-    
+
+    conn = get_connection()
+
+    rows = conn.execute(
+        "SELECT * FROM todos WHERE done = ?",
+        (is_done,)
+    ).fetchall()
+
+    conn.close()
+
     return {
         "status": status,
-        "count": len(filtered_todos),
-        "todos": filtered_todos
+        "count": len(rows),
+        "todos": [dict(row) for row in rows]
     }
