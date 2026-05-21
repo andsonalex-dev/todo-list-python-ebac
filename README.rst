@@ -1,7 +1,7 @@
 TODO List API - EBAC
 ====================
 
-API REST para gerenciamento de tarefas utilizando **FastAPI** e **Pydantic BaseModel**.
+API REST para gerenciamento de tarefas utilizando **FastAPI**, **Pydantic BaseModel** e persistência em **SQLite**.
 
 Tecnologias Utilizadas
 ----------------------
@@ -11,6 +11,17 @@ Tecnologias Utilizadas
 - **Pydantic v2** - Validação de dados e serialização
 - **Poetry** - Gerenciamento de dependências
 - **Uvicorn** - Servidor ASGI
+- **SQLite** - Banco de dados relacional embarcado para persistência local
+
+Persistência de Dados
+---------------------
+
+A aplicação deixou de usar armazenamento em arquivo JSON e agora persiste as tarefas em um banco de dados **SQLite** local.
+
+- O banco é criado automaticamente na inicialização da aplicação
+- O arquivo do banco fica em ``todo_list_python/todos.db``
+- A tabela ``todos`` também é criada automaticamente, se ainda não existir
+- Não é necessário instalar um servidor de banco separado
 
 Características do Pydantic Implementadas
 -----------------------------------------
@@ -41,6 +52,19 @@ Instalação
 
 A API estará disponível em: http://localhost:8000
 
+Autenticação
+------------
+
+Os endpoints exigem autenticação HTTP Basic.
+
+Credenciais disponíveis para testes::
+
+    Usuário: admin
+    Senha: admin123
+
+    Usuário: user
+    Senha: user123
+
 Documentação da API
 ------------------
 
@@ -50,13 +74,23 @@ Documentação da API
 Endpoints Disponíveis
 ---------------------
 
-- **GET** ``/todos`` - Lista todas as tarefas
+- **GET** ``/todos`` - Lista tarefas com autenticação, paginação e ordenação
 - **POST** ``/todos`` - Cria uma nova tarefa
 - **GET** ``/todos/{todo_id}`` - Obtém uma tarefa específica
 - **PUT** ``/todos/{todo_id}`` - Atualiza uma tarefa
 - **DELETE** ``/todos/{todo_id}`` - Remove uma tarefa
 - **PATCH** ``/todos/{todo_id}/toggle`` - Alterna status de conclusão
 - **GET** ``/todos/status/{status}`` - Lista tarefas por status (completed/pending)
+
+Parâmetros da Listagem
+----------------------
+
+O endpoint ``GET /todos`` aceita os seguintes parâmetros de consulta:
+
+- ``page``: número da página, padrão ``1``
+- ``size``: quantidade de itens por página, padrão ``10``
+- ``order_by``: campo para ordenação (``id``, ``title``, ``description``, ``done``)
+- ``order_direction``: direção da ordenação (``asc`` ou ``desc``)
 
 Modelos de Dados
 ----------------
@@ -88,3 +122,5 @@ Validações Implementadas
 
 
 Curso EBAC - Projeto atualizado com Pydantic BaseModel
+
+Evolução recente: persistência migrada para banco de dados SQLite local.
